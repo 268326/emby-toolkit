@@ -1,71 +1,72 @@
-name: Docker Image CI & CD for Emby Toolkit
-
-on:
-  push:
-    branches:
-      - main      # 监听 主 分支
-      - dev        # 监听 开发 分支
-    tags:
-      - 'v*'
-  workflow_dispatch:
-
-jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v3
-        
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/emby-toolkit
-          tags: |
-            # 规则1: 如果事件是推送到一个分支，就用分支名作为 Docker 标签。
-            # 这会自动为默认分支(main)打上 'latest' 标签。
-            type=ref,event=branch
-
-            # 规则2: 如果事件是推送一个 Git 标签，就直接使用该标签名作为 Docker 标签。
-            type=ref,event=tag
-
-      # 根据分支或标签确定构建平台
-      - name: Determine build platforms
-        id: set_platforms
-        run: |
-          # 在这里，我们让 GitHub Actions 先执行 startsWith 函数，并将其结果（'true' 或 'false'）插入到脚本中
-          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ]]; then
-            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
-          else
-            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # 使用上一步的输出作为平台列表
-          platforms: ${{ steps.set_platforms.outputs.platforms }}
-          cache-from: type=gha
+name: Docker Image CI & CD for Emby Toolkit  
+  
+on:  
+  push:  
+    branches:  
+      - main      # 监听 主 分支  
+      - dev        # 监听 开发 分支  
+    tags:  
+      - 'v*'  
+  workflow_dispatch:  
+  
+jobs:  
+  build-and-push:  
+    runs-on: ubuntu-latest  
+    permissions:  
+      contents: read  
+      packages: write  
+  
+    steps:  
+      - name: Checkout repository  
+        uses: actions/checkout@v4  
+  
+      - name: Set up QEMU  
+        uses: docker/setup-qemu-action@v3  
+  
+      - name: Set up Docker Buildx  
+        id: buildx  
+        uses: docker/setup-buildx-action@v3  
+          
+      - name: Log in to GitHub Container Registry  
+        uses: docker/login-action@v3  
+        with:  
+          registry: ghcr.io  
+          username: ${{ github.actor }}  
+          password: ${{ secrets.GITHUB_TOKEN }}  
+  
+      - name: Extract Docker metadata  
+        id: meta  
+        uses: docker/metadata-action@v5  
+        with:  
+          images: ghcr.io/${{ github.repository }}  
+          tags: |  
+            # 规则1: 如果事件是推送到一个分支，就用分支名作为 Docker 标签。  
+            # 这会自动为默认分支(main)打上 'latest' 标签。  
+            type=ref,event=branch  
+  
+            # 规则2: 如果事件是推送一个 Git 标签，就直接使用该标签名作为 Docker 标签。  
+            type=ref,event=tag  
+  
+      # 根据分支或标签确定构建平台  
+      - name: Determine build platforms  
+        id: set_platforms  
+        run: |  
+          # 在这里，我们让 GitHub Actions 先执行 startsWith 函数，并将其结果（'true' 或 'false'）插入到脚本中  
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ]]; then  
+            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT  
+          else  
+            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT  
+          fi  
+  
+      - name: Build and push Docker image  
+        uses: docker/build-push-action@v5  
+        with:  
+          context: .  
+          file: ./Dockerfile  
+          push: true  
+          tags: ${{ steps.meta.outputs.tags }}  
+          labels: ${{ steps.meta.outputs.labels }}  
+          # 使用上一步的输出作为平台列表  
+          platforms: ${{ steps.set_platforms.outputs.platforms }}  
+          cache-from: type=gha  
           cache-to: type=gha,mode=max
