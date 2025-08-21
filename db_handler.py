@@ -812,6 +812,72 @@ def update_single_movie_status_in_collection(db_path: str, collection_id: str, m
             conn.rollback()
         raise
 
+# ★★★ 新增：批量将指定合集中的'missing'电影状态更新为'subscribed' ★★★
+def batch_mark_movies_as_subscribed_in_collections(db_path: str, collection_ids: List[str]) -> int:
+    """
+    批量将指定合集列表中的所有'missing'状态的电影更新为'subscribed'。
+    这是一个纯粹的数据库操作，不会触发任何外部订阅。
+
+    :param db_path: 数据库路径。
+    :param collection_ids: 需要操作的合集 Emby ID 列表。
+    :return: 成功更新状态的电影总数。
+    """
+    if not collection_ids:
+        return 0
+
+    total_updated_movies = 0
+    try:
+        with get_db_connection(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # 使用参数化查询获取所有相关的合集
+            placeholders = ','.join('?' for _ in collection_ids)
+            sql_select = f"SELECT emby_collection_id, missing_movies_json FROM collections_info WHERE emby_collection_id IN ({placeholders})"
+            cursor.execute(sql_select, collection_ids)
+            collections_to_process = cursor.fetchall()
+
+            if not collections_to_process:
+                return 0
+
+            cursor.execute("BEGIN TRANSACTION;")
+            try:
+                for collection_row in collections_to_process:
+                    collection_id = collection_row['emby_collection_id']
+                    
+                    try:
+                        movies = json.loads(collection_row['missing_movies_json'] or '[]')
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
+                    movies_changed_in_this_collection = False
+                    for movie in movies:
+                        if movie.get('status') == 'missing':
+                            movie['status'] = 'subscribed'
+                            total_updated_movies += 1
+                            movies_changed_in_this_collection = True
+                    
+                    # 只有当这个合集确实有状态被改变时，才回写数据库
+                    if movies_changed_in_this_collection:
+                        # 既然所有 missing 都被改了，has_missing 标志肯定为 False
+                        new_missing_json = json.dumps(movies, ensure_ascii=False)
+                        cursor.execute(
+                            "UPDATE collections_info SET missing_movies_json = ?, has_missing = 0 WHERE emby_collection_id = ?",
+                            (new_missing_json, collection_id)
+                        )
+                
+                conn.commit()
+                logger.info(f"DB: 成功将 {len(collection_ids)} 个合集中的 {total_updated_movies} 部缺失电影标记为已订阅。")
+
+            except Exception as e_trans:
+                conn.rollback()
+                logger.error(f"批量标记已订阅的数据库事务失败，已回滚: {e_trans}", exc_info=True)
+                raise
+        
+        return total_updated_movies
+
+    except Exception as e:
+        logger.error(f"DB: 批量标记电影为已订阅时发生错误: {e}", exc_info=True)
+        raise
 # ======================================================================
 # 模块 6: 演员订阅数据访问 (Actor Subscriptions Data Access)
 # ======================================================================

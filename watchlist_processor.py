@@ -300,7 +300,7 @@ class WatchlistProcessor:
             time.sleep(0.1) # 保持对API的尊重
 
         # 步骤3: 获取Emby本地数据 (保持不变)
-        emby_children = emby_handler.get_series_children(item_id, self.emby_url, self.emby_api_key, self.emby_user_id)
+        emby_children = emby_handler.get_series_children(item_id, self.emby_url, self.emby_api_key, self.emby_user_id, fields="Id,Name,ParentIndexNumber,IndexNumber,Type,Overview")
         emby_seasons = {}
         if emby_children:
             for child in emby_children:
@@ -355,33 +355,39 @@ class WatchlistProcessor:
         self._update_watchlist_entry(item_id, item_name, updates_to_db)
 
         # 步骤6: 【最终动作】如果需要，命令Emby刷新自己
-        # 只有当剧集状态是“追剧中”（意味着有新内容或缺失内容）时，才有必要触发刷新
-        # 只有当剧集状态是“追剧中”并且有缺失媒体时，才执行手术
-        if final_status == STATUS_WATCHING and has_missing_media:
-            logger.info("  -> 检测到剧集有缺失，开始执行元数据更新...")
-            
-            # 我们只关心那些在TMDb上存在，但在Emby中缺失的分集
-            for missing_ep_tmdb_data in missing_info.get("missing_episodes", []):
-                s_num = missing_ep_tmdb_data.get("season_number")
-                e_num = missing_ep_tmdb_data.get("episode_number")
+        tmdb_episodes_map = {
+            f"S{ep.get('season_number')}E{ep.get('episode_number')}": ep
+            for ep in all_tmdb_episodes
+            if ep.get('season_number') is not None and ep.get('episode_number') is not None
+        }
 
-                # 在Emby的所有子项目中找到这个刚刚出现的分集
-                found_emby_episode = next((ep for ep in emby_children if ep.get("ParentIndexNumber") == s_num and ep.get("IndexNumber") == e_num), None)
+        # 遍历Emby中实际存在的所有子项目
+        for emby_episode in emby_children:
+            # 只处理“分集”类型，并且简介(Overview)为空的项目
+            if emby_episode.get("Type") == "Episode" and not emby_episode.get("Overview"):
+                s_num = emby_episode.get("ParentIndexNumber")
+                e_num = emby_episode.get("IndexNumber")
+                
+                if s_num is None or e_num is None:
+                    continue
 
-                # 如果在Emby中找到了对应的“空壳”分集，我们就为它注入元数据
-                if found_emby_episode:
-                    emby_episode_id = found_emby_episode.get("Id")
-                    ep_name_for_log = f"S{s_num:02d}E{e_num:02d}"
-                    logger.info(f"  -> 发现新分集 '{ep_name_for_log}' (ID: {emby_episode_id}) 已在Emby中，准备为其注入元数据...")
-                    
-                    # 准备要注入的数据 (简介、标题等)
+                ep_key = f"S{s_num}E{e_num}"
+                ep_name_for_log = f"S{s_num:02d}E{e_num:02d}"
+                
+                # 从TMDb数据中查找对应的分集信息
+                tmdb_data_for_episode = tmdb_episodes_map.get(ep_key)
+
+                if tmdb_data_for_episode:
+                    emby_episode_id = emby_episode.get("Id")
+                    logger.info(f"  -> 发现分集 '{ep_name_for_log}' (ID: {emby_episode_id}) 缺少简介，准备从TMDb注入...")
+
+                    # 准备要注入的数据
                     data_to_inject = {
-                        "Name": missing_ep_tmdb_data.get("name"),
-                        "Overview": missing_ep_tmdb_data.get("overview")
-                        # 未来可以扩展，注入更多字段，如评分、播出日期等
+                        "Name": tmdb_data_for_episode.get("name"),
+                        "Overview": tmdb_data_for_episode.get("overview")
                     }
                     
-                    # 调用我们的“注射器”函数
+                    # 调用“注射器”函数
                     emby_handler.update_emby_item_details(
                         item_id=emby_episode_id,
                         new_data=data_to_inject,
@@ -389,6 +395,8 @@ class WatchlistProcessor:
                         emby_api_key=self.emby_api_key,
                         user_id=self.emby_user_id
                     )
+                else:
+                    logger.warning(f"  -> Emby分集 '{ep_name_for_log}' 缺少简介，但在TMDb中未找到对应信息。")
         else:
             logger.info(f"  -> 剧集状态为 '{translate_internal_status(final_status)}' 或本地文件完整，无需执行分集更新。")
 

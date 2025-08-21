@@ -1,4 +1,4 @@
-<!-- src/components/CollectionsPage.vue (纯粹电影合集版) -->
+<!-- src/components/CollectionsPage.vue (主列表多选 + 批量标记状态完整版) -->
 <template>
   <n-layout content-style="padding: 24px;">
     <div class="collections-page">
@@ -27,6 +27,19 @@
         </template>
         <template #extra>
           <n-space>
+            <!-- ★ 批量操作按钮 -->
+            <n-dropdown
+              v-if="selectedCollectionIds.length > 0"
+              trigger="click"
+              :options="batchActions"
+              @select="handleBatchAction"
+            >
+              <n-button type="primary">
+                批量操作 ({{ selectedCollectionIds.length }})
+                <template #icon><n-icon :component="CaretDownIcon" /></template>
+              </n-button>
+            </n-dropdown>
+
             <n-popconfirm @positive-click="subscribeAllMissingMovies" :disabled="globalStats.totalMissingMovies === 0">
               <template #trigger>
                 <n-tooltip>
@@ -62,8 +75,20 @@
       
       <div v-else-if="collections.length > 0" style="margin-top: 24px;">
         <n-grid cols="1 s:2 m:3 l:4 xl:5" :x-gap="20" :y-gap="20" responsive="screen">
-          <n-gi v-for="item in renderedCollections" :key="item.emby_collection_id">
-            <n-card class="dashboard-card series-card" :bordered="false" content-style="display: flex; padding: 0; gap: 16px;">
+          <n-gi v-for="(item, i) in renderedCollections" :key="item.emby_collection_id">
+            <n-card 
+              class="dashboard-card series-card" 
+              :bordered="false" 
+              content-style="display: flex; padding: 0; gap: 16px;"
+              :class="{ selected: selectedCollectionIds.includes(item.emby_collection_id) }"
+              @click="toggleSelection(item.emby_collection_id, $event, i)"
+              hoverable
+            >
+              <n-checkbox
+                :checked="selectedCollectionIds.includes(item.emby_collection_id)"
+                @update:checked="(checked, event) => toggleSelection(item.emby_collection_id, event, i)"
+                class="card-checkbox"
+              />
               <div class="card-poster-container"><n-image lazy :src="getCollectionPosterUrl(item.poster_path)" class="card-poster" object-fit="cover"><template #placeholder><div class="poster-placeholder"><n-icon :component="AlbumsIcon" size="32" /></div></template></n-image></div>
               <div class="card-content-container">
                 <div class="card-header"><n-ellipsis class="card-title" :tooltip="{ style: { maxWidth: '300px' } }">{{ item.name }}</n-ellipsis></div>
@@ -81,9 +106,16 @@
                   </n-space>
                 </div>
                 <div class="card-actions">
-                  <n-button type="primary" size="small" @click="() => openMissingMoviesModal(item)"><template #icon><n-icon :component="EyeIcon" /></template>查看详情</n-button>
-                  <n-tooltip><template #trigger><n-button text @click="openInEmby(item.emby_collection_id)"><template #icon><n-icon :component="EmbyIcon" size="18" /></template></n-button></template>在 Emby 中打开</n-tooltip>
-                  <n-tooltip><template #trigger><n-button text tag="a" :href="`https://www.themoviedb.org/collection/${item.tmdb_collection_id}`" target="_blank" :disabled="!item.tmdb_collection_id"><template #icon><n-icon :component="TMDbIcon" size="18" /></template></n-button></template>在 TMDb 中打开</n-tooltip>
+                  <n-tooltip>
+                    <template #trigger>
+                      <n-button type="primary" size="small" circle @click.stop="() => openMissingMoviesModal(item)">
+                        <template #icon><n-icon :component="EyeIcon" /></template>
+                      </n-button>
+                    </template>
+                    查看详情
+                  </n-tooltip>
+                  <n-tooltip><template #trigger><n-button text @click.stop="openInEmby(item.emby_collection_id)"><template #icon><n-icon :component="EmbyIcon" size="18" /></template></n-button></template>在 Emby 中打开</n-tooltip>
+                  <n-tooltip><template #trigger><n-button text tag="a" :href="`https://www.themoviedb.org/collection/${item.tmdb_collection_id}`" target="_blank" :disabled="!item.tmdb_collection_id" @click.stop><template #icon><n-icon :component="TMDbIcon" size="18" /></template></n-button></template>在 TMDb 中打开</n-tooltip>
                 </div>
               </div>
             </n-card>
@@ -173,17 +205,17 @@
 </template>
 
 <script setup>
-// ... (script setup部分与您之前的文件几乎完全相同，只是去掉了所有item_type的判断)
 import { ref, onMounted, onBeforeUnmount, computed, watch, h } from 'vue';
 import axios from 'axios';
-import { NLayout, NPageHeader, NEmpty, NTag, NButton, NSpace, NIcon, useMessage, NTooltip, NGrid, NGi, NCard, NImage, NEllipsis, NSpin, NAlert, NModal, NTabs, NTabPane, NPopconfirm } from 'naive-ui';
-import { SyncOutline, AlbumsOutline as AlbumsIcon, EyeOutline as EyeIcon, CloudDownloadOutline as CloudDownloadIcon, CloseCircleOutline as CloseCircleIcon, CheckmarkCircleOutline as CheckmarkCircle } from '@vicons/ionicons5';
+import { NLayout, NPageHeader, NEmpty, NTag, NButton, NSpace, NIcon, useMessage, useDialog, NTooltip, NGrid, NGi, NCard, NImage, NEllipsis, NSpin, NAlert, NModal, NTabs, NTabPane, NPopconfirm, NCheckbox, NDropdown } from 'naive-ui';
+import { SyncOutline, AlbumsOutline as AlbumsIcon, EyeOutline as EyeIcon, CloudDownloadOutline as CloudDownloadIcon, CloseCircleOutline as CloseCircleIcon, CheckmarkCircleOutline as CheckmarkCircle, CaretDownOutline as CaretDownIcon } from '@vicons/ionicons5';
 import { format } from 'date-fns';
 import { useConfig } from '../composables/useConfig.js';
 
 const props = defineProps({ taskStatus: { type: Object, required: true } });
 const { configModel } = useConfig();
 const message = useMessage();
+const dialog = useDialog();
 const isTaskRunning = computed(() => props.taskStatus.is_running);
 const EmbyIcon = () => h('svg', { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 48 48", width: "18", height: "18" }, [ h('path', { d: "M24,4.2c-11,0-19.8,8.9-19.8,19.8S13,43.8,24,43.8s19.8-8.9,19.8-19.8S35,4.2,24,4.2z M24,39.8c-8.7,0-15.8-7.1-15.8-15.8S15.3,8.2,24,8.2s15.8,7.1,15.8,15.8S32.7,39.8,24,39.8z", fill: "currentColor" }), h('polygon', { points: "22.2,16.4 22.2,22.2 16.4,22.2 16.4,25.8 22.2,25.8 22.2,31.6 25.8,31.6 25.8,25.8 31.6,31.6 31.6,22.2 25.8,22.2 25.8,16.4 ", fill: "currentColor" }) ]);
 const TMDbIcon = () => h('svg', { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 512 512", width: "18", height: "18" }, [ h('path', { d: "M256 512A256 256 0 1 0 256 0a256 256 0 1 0 0 512zM133.2 176.6a22.4 22.4 0 1 1 0-44.8 22.4 22.4 0 1 1 0 44.8zm63.3-22.4a22.4 22.4 0 1 1 44.8 0 22.4 22.4 0 1 1 -44.8 0zm74.8 108.2c-27.5-3.3-50.2-26-53.5-53.5a8 8 0 0 1 16-.6c2.3 19.3 18.8 34 38.1 31.7a8 8 0 0 1 7.4 8c-2.3.3-4.5.4-6.8.4zm-74.8-108.2a22.4 22.4 0 1 1 44.8 0 22.4 22.4 0 1 1 -44.8 0zm149.7 22.4a22.4 22.4 0 1 1 0-44.8 22.4 22.4 0 1 1 0 44.8zM133.2 262.6a22.4 22.4 0 1 1 0-44.8 22.4 22.4 0 1 1 0 44.8zm63.3-22.4a22.4 22.4 0 1 1 44.8 0 22.4 22.4 0 1 1 -44.8 0zm74.8 108.2c-27.5-3.3-50.2-26-53.5-53.5a8 8 0 0 1 16-.6c2.3 19.3 18.8 34 38.1 31.7a8 8 0 0 1 7.4 8c-2.3.3-4.5.4-6.8.4zm-74.8-108.2a22.4 22.4 0 1 1 44.8 0 22.4 22.4 0 1 1 -44.8 0zm149.7 22.4a22.4 22.4 0 1 1 0-44.8 22.4 22.4 0 1 1 0 44.8z", fill: "#01b4e4" }) ]);
@@ -200,6 +232,81 @@ const displayCount = ref(50);
 const INCREMENT = 50;
 const loaderRef = ref(null);
 let observer = null;
+
+const selectedCollectionIds = ref([]);
+const lastSelectedIndex = ref(null);
+
+const toggleSelection = (collectionId, event, index) => {
+  if (!event) return;
+  
+  if (event.target.closest('.n-checkbox')) {
+    event.stopPropagation();
+  }
+
+  if (event.shiftKey && lastSelectedIndex.value !== null) {
+    const start = Math.min(lastSelectedIndex.value, index);
+    const end = Math.max(lastSelectedIndex.value, index);
+    const idsInRange = renderedCollections.value.slice(start, end + 1).map(c => c.emby_collection_id);
+    
+    const isCurrentlySelected = selectedCollectionIds.value.includes(collectionId);
+    const willSelect = !isCurrentlySelected;
+
+    if (willSelect) {
+      const newSet = new Set(selectedCollectionIds.value);
+      idsInRange.forEach(id => newSet.add(id));
+      selectedCollectionIds.value = Array.from(newSet);
+    } else {
+      selectedCollectionIds.value = selectedCollectionIds.value.filter(id => !idsInRange.includes(id));
+    }
+  } else {
+    const idx = selectedCollectionIds.value.indexOf(collectionId);
+    if (idx > -1) {
+      selectedCollectionIds.value.splice(idx, 1);
+    } else {
+      selectedCollectionIds.value.push(collectionId);
+    }
+  }
+  lastSelectedIndex.value = index;
+};
+
+const batchActions = computed(() => [
+  {
+    label: '标记为已订阅',
+    key: 'markAsSubscribed',
+    icon: () => h(NIcon, { component: CheckmarkCircle })
+  }
+]);
+
+const handleBatchAction = (key) => {
+  if (key === 'markAsSubscribed') {
+    const selectedWithMissing = collections.value.filter(c => 
+      selectedCollectionIds.value.includes(c.emby_collection_id) && getMissingCount(c) > 0
+    );
+    if (selectedWithMissing.length === 0) {
+      message.info('选中的合集中没有需要标记的缺失电影。');
+      return;
+    }
+    
+    dialog.warning({
+      title: '确认操作',
+      content: `确定要将选中的 ${selectedWithMissing.length} 个合集中的所有“缺失”电影的状态标记为“已订阅”吗？此操作不会真的发起订阅请求。`,
+      positiveText: '确定',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        try {
+          const response = await axios.post('/api/collections/batch_mark_as_subscribed', {
+            collection_ids: selectedWithMissing.map(c => c.emby_collection_id)
+          });
+          message.success(response.data.message || '批量标记成功！');
+          await loadCachedData();
+          selectedCollectionIds.value = [];
+        } catch (err) {
+          message.error(err.response?.data?.error || '批量标记失败。');
+        }
+      }
+    });
+  }
+};
 
 const getMissingCount = (collection) => {
   if (!collection || !Array.isArray(collection.missing_movies)) return 0;
@@ -413,6 +520,35 @@ const extractYear = (dateStr) => {
 <style scoped>
 .collections-page { padding: 0 10px; }
 .center-container { display: flex; justify-content: center; align-items: center; height: calc(100vh - 200px); }
+
+.series-card {
+  position: relative;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+.series-card.selected {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px 0 var(--n-color-target);
+}
+.card-checkbox {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  padding: 4px;
+  --n-color-checked: var(--n-color-primary-hover);
+  --n-border-radius: 50%;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+}
+.series-card:hover .card-checkbox,
+.series-card.selected .card-checkbox {
+  opacity: 1;
+  visibility: visible;
+}
+
 .card-poster-container { flex-shrink: 0; width: 120px; height: 180px; }
 .card-poster { width: 100%; height: 100%; }
 .poster-placeholder { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; background-color: var(--n-action-color); }
@@ -439,27 +575,9 @@ const extractYear = (dateStr) => {
   justify-content: center;
   align-items: center;
 }
-/*
-  【布局终极修正】
-  此样式块专门用于对抗 .dashboard-card 的全局布局设置。
-  它使用 :deep() 来穿透组件，并用 !important 强制覆盖，
-  确保追剧列表的卡片内容区（.n-card__content）采用我们期望的水平布局。
-*/
 .series-card.dashboard-card > :deep(.n-card__content) {
-  /* 核心：强制将 flex 方向从全局的 "column" 改为 "row" */
   flex-direction: row !important;
-
-  /* 
-    重置对齐方式。
-    全局的 "space-between" 在水平布局下会导致元素被拉开，
-    我们把它改回默认的起始对齐。
-  */
   justify-content: flex-start !important;
-
-  /* 
-    重置内边距和间距，以匹配你在 template 中最初的设定。
-    这确保了海报和右侧内容区之间有正确的空隙。
-  */
   padding: 12px !important;
   gap: 12px !important;
 }

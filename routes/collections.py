@@ -131,3 +131,33 @@ def api_update_movie_status():
     except Exception as e:
         logger.error(f"更新电影状态时发生数据库错误: {e}", exc_info=True)
         return jsonify({"error": "服务器在处理请求时发生内部错误"}), 500
+    
+# ★★★ 新增：批量将缺失电影的状态标记为“已订阅”（不触发真订阅） ★★★
+@collections_bp.route('/batch_mark_as_subscribed', methods=['POST'])
+@login_required
+def api_batch_mark_as_subscribed():
+    data = request.json
+    collection_ids = data.get('collection_ids')
+
+    if not collection_ids or not isinstance(collection_ids, list):
+        return jsonify({"error": "请求中缺少 collection_ids 或格式不正确"}), 400
+
+    logger.info(f"API: 收到请求，将 {len(collection_ids)} 个合集中的缺失电影标记为已订阅。")
+    
+    try:
+        # 调用一个新的、只操作数据库的函数
+        updated_count = db_handler.batch_mark_movies_as_subscribed_in_collections(
+            db_path=config_manager.DB_PATH,
+            collection_ids=collection_ids
+        )
+        
+        if updated_count > 0:
+            message = f"操作成功！共将 {updated_count} 部缺失电影的状态标记为“已订阅”。"
+        else:
+            message = "操作完成，但在所选合集中没有找到需要更新状态的缺失电影。"
+            
+        return jsonify({"message": message, "count": updated_count}), 200
+
+    except Exception as e:
+        logger.error(f"执行批量标记为已订阅时发生严重错误: {e}", exc_info=True)
+        return jsonify({"error": "服务器在处理请求时发生内部错误"}), 500

@@ -573,8 +573,8 @@ def get_series_children(
     api_key: str,
     user_id: str,
     series_name_for_log: Optional[str] = None,
-    # ★★★★★★★★★★★★★★★ 新增参数 ★★★★★★★★★★★★★★★
-    include_item_types: str = "Season,Episode" # 默认同时获取季和集
+    include_item_types: str = "Season,Episode",
+    fields: str = "Id,Name,ParentIndexNumber,IndexNumber"
 ) -> Optional[List[Dict[str, Any]]]:
     """
     【V2 - 灵活版】获取指定剧集下的子项目，可以指定类型。
@@ -592,7 +592,7 @@ def get_series_children(
         # ★★★★★★★★★★★★★★★ 使用新参数 ★★★★★★★★★★★★★★★
         "IncludeItemTypes": include_item_types,
         "Recursive": "true",
-        "Fields": "Id,Name,ParentIndexNumber,IndexNumber", # 只请求必要的字段
+        "Fields": fields,
     }
     
     logger.debug(f"  -> 准备获取剧集 {log_identifier} 的子项目 (类型: {include_item_types})...")

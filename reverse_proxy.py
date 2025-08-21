@@ -274,7 +274,7 @@ def handle_get_mimicked_library_items(user_id, mimicked_id, params):
         if sort_by_field and sort_by_field != 'none':
             sort_order = definition.get('default_sort_order', 'Ascending')
             is_descending = (sort_order == 'Descending')
-            logger.trace(f"执行服务器端排序劫持: '{sort_by_field}' ({sort_order})")
+            logger.trace(f"执行虚拟库排序劫持: '{sort_by_field}' ({sort_order})")
             
             default_sort_value = 0 if sort_by_field in ['CommunityRating', 'ProductionYear'] else "0"
             try:
@@ -287,7 +287,7 @@ def handle_get_mimicked_library_items(user_id, mimicked_id, params):
                 final_items.sort(key=lambda item: item.get('SortName', ''))
         else:
             # 如果用户选择'none'或未设置，则不执行任何排序，直接放行
-            logger.debug("未设置服务器端排序，将使用Emby原生排序。")
+            logger.debug("未设置虚拟库排序，将使用Emby原生排序。")
 
         # --- 3. 返回最终的列表 (可能是排好序的，也可能是原生的) ---
         final_response = {"Items": final_items, "TotalRecordCount": len(final_items)}
